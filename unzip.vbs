@@ -1,0 +1,20 @@
+On Error Resume Next
+Dim Args, Filename, Path, Fullpath, Pathdir, Shellobj, Sourceobj, Targetobj, intOptions
+Set Args = WScript.Arguments
+If(WScript.Arguments.Count > 0) Then
+	Filename = Args(0)
+Else
+	WScript.Quit
+End If
+Path = CreateObject("Scripting.FileSystemObject").GetAbsolutePathName(".")
+Fullpath = Path & "\" & Filename
+Pathdir = Path & "\"
+Set Shellobj = CreateObject("Shell.Application")
+Set Sourceobj = Shellobj.NameSpace(Fullpath).Items()
+If Err.Number <> 0 Then
+	WScript.Quit
+End If
+Set Targetobj = Shellobj.NameSpace(Pathdir)
+intOptions = 256
+Targetobj.CopyHere Sourceobj, intOptions
+WScript.Quit
